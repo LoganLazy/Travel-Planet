@@ -1,18 +1,20 @@
 import { z } from "zod";
 
+// 下限与 lib/llm.ts 提示词里的要求一致；上限防止异常大模型输出把超大
+// 文本写进数据库。
 const itemSchema = z.object({
-  name: z.string(),
-  description: z.string(),
+  name: z.string().min(1).max(100),
+  description: z.string().min(1).max(1000),
 });
 
 export const guideSchema = z.object({
-  intro: z.string(),
-  attractions: z.array(itemSchema),
-  food: z.array(itemSchema),
-  accommodation: z.array(itemSchema),
-  season: z.string(),
-  transport: z.string(),
-  tips: z.array(z.string()),
+  intro: z.string().min(1).max(2000),
+  attractions: z.array(itemSchema).min(5).max(20),
+  food: z.array(itemSchema).min(3).max(20),
+  accommodation: z.array(itemSchema).min(2).max(20),
+  season: z.string().min(1).max(2000),
+  transport: z.string().min(1).max(2000),
+  tips: z.array(z.string().min(1).max(1000)).min(3).max(20),
 });
 
 export type StructuredGuide = z.infer<typeof guideSchema>;

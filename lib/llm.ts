@@ -12,6 +12,10 @@ export interface GuideResult {
   cacheable: boolean;
 }
 
+// 上游响应体上限：超过就按解析失败处理，不要把超大文本塞进 JSON.parse 或日志。
+const MAX_LLM_RESPONSE_CHARS = 200_000;
+const LLM_TIMEOUT_MS = 60_000;
+
 export async function generateGuide(input: GuideInput): Promise<GuideResult> {
   const provider = process.env.LLM_PROVIDER ?? "mock";
   if (provider === "openai") {
@@ -21,7 +25,7 @@ export async function generateGuide(input: GuideInput): Promise<GuideResult> {
   return { guide: JSON.stringify(mockGuide(input)), cacheable: false };
 }
 
-function mockGuide(input: GuideInput): StructuredGuide {
+export function mockGuide(input: GuideInput): StructuredGuide {
   const { placeName, country } = input;
   const where = country ? `${placeName}（${country}）` : placeName;
   return {
@@ -30,10 +34,13 @@ function mockGuide(input: GuideInput): StructuredGuide {
       { name: "示例景点 A", description: "代表性人文景观，建议游玩 2 小时。" },
       { name: "示例景点 B", description: "自然风光，适合拍照和散步。" },
       { name: "示例景点 C", description: "当地博物馆，了解城市历史。" },
+      { name: "示例景点 D", description: "本地市场，体验市井生活，适合逛 1 小时。" },
+      { name: "示例景点 E", description: "城市制高点，傍晚看日落的好地方。" },
     ],
     food: [
       { name: "当地特色菜", description: "必尝的招牌菜。" },
       { name: "传统小吃", description: "街头巷尾随处可见。" },
+      { name: "老字号面馆", description: "本地人常去的早餐店，分量实在。" },
     ],
     accommodation: [
       { name: "市中心区域", description: "交通便利，餐饮和景点都在步行范围内。" },
@@ -83,21 +90,44 @@ async function openAICompatibleGuide(input: GuideInput): Promise<StructuredGuide
       model,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
+      max_tokens: 4000,
     }),
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+  }).catch((e: unknown) => {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error("LLM 请求超时，请稍后再试");
+    }
+    throw e;
   });
 
   if (!res.ok) {
-    throw new Error(`LLM 请求失败：${res.status} ${await res.text()}`);
+    // 不要把上游响应正文拼进 Error：它会一路进日志甚至返回给调用方。
+    // 只在服务端记一条截断的日志，对外只给状态码。
+    const body = await res.text().catch(() => "");
+    console.error(`[llm] 请求失败 status=${res.status} body=${body.slice(0, 500)}`);
+    throw new Error(`LLM 请求失败：${res.status}`);
   }
-  const json = await res.json();
+  const text = await res.text();
+  if (text.length > MAX_LLM_RESPONSE_CHARS) {
+    console.error(`[llm] 响应过大（${text.length} 字符），拒绝解析`);
+    throw new Error("LLM 返回内容过大，无法解析");
+  }
+  let json: {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  try {
+    json = JSON.parse(text) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+  } catch {
+    throw new Error("LLM 返回不是合法 JSON");
+  }
   const raw = json.choices?.[0]?.message?.content ?? "";
   const parsed = parseGuide(raw);
   if (!parsed) {
     console.error(
       "[llm] parse failed. raw content:",
-      JSON.stringify(raw),
-      "full response:",
-      JSON.stringify(json).slice(0, 1000),
+      JSON.stringify(raw).slice(0, 500),
     );
     throw new Error(
       `LLM 返回无法解析为攻略 JSON: ${raw.slice(0, 200) || "(空响应)"}`,

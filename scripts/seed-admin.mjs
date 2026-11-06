@@ -10,6 +10,11 @@ if (!email || !password) {
   process.exit(1);
 }
 
+if (password.length < 8) {
+  console.error("[seed-admin] 管理员密码至少 8 位");
+  process.exit(1);
+}
+
 const prisma = new PrismaClient();
 const normalizedEmail = email.trim().toLowerCase();
 
