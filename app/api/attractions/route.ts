@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { reverseGeocode } from "@/lib/geocode";
 import { generateGuide } from "@/lib/llm";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
+import { requireAdmin } from "@/lib/admin-guard";
 
 const schema = z.object({
   lat: z.number().min(-90).max(90),
@@ -28,13 +27,11 @@ export async function POST(req: Request) {
   const key = geoKey(lat, lng);
 
   if (refresh) {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.isAdmin) {
-      return NextResponse.json(
-        { error: "仅管理员可刷新攻略" },
-        { status: 403 },
-      );
-    }
+    // 不要只认 JWT 里的 isAdmin：JWT 在签发后无法吊销，被撤权的管理员在
+    // 会话有效期内仍持有旧 token。requireAdmin 每次都查库，和 /api/admin/*
+    // 的做法一致。
+    const denied = await requireAdmin();
+    if (denied) return denied;
     const place = await reverseGeocode(lat, lng);
     if (!place) {
       return NextResponse.json(

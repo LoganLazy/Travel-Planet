@@ -5,6 +5,9 @@ import { reverseGeocode } from "@/lib/geocode";
 import { generateGuide } from "@/lib/llm";
 import { requireAdmin } from "@/lib/admin-guard";
 
+// 注意：maxDuration 只在 Vercel 部署上生效（Pro 套餐上限 300 秒，免费版
+// 会被钳制到更小的值）；aPanel 自建部署（PM2 + Nginx）下这个值会被忽略，
+// 超时由 Nginx / PM2 的配置决定。
 export const maxDuration = 300;
 
 const schema = z.object({

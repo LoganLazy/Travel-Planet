@@ -59,13 +59,9 @@ npx prisma migrate deploy
 npm run build
 ```
 
-第一次执行 `npx prisma migrate deploy` 会按 `prisma/migrations` 里的迁移建表。
+第一次执行 `npx prisma migrate deploy` 会按 `prisma/migrations` 里的迁移建表（迁移文件已在仓库里，首次部署直接跑就行，不用再生成）。
 
-> 如果项目里还没有 migrations 目录（首次部署），改用：
-> ```bash
-> npx prisma migrate dev --name init
-> ```
-> 它会生成迁移文件 + 建表。之后再次部署用 `migrate deploy` 就行。
+> 注意：不要在生产服务器上跑 `npx prisma migrate dev`。那是开发命令，会建影子库、可能提示重置数据库，只适合本地开发。生产建表和升级都用 `migrate deploy`。
 
 ## 六、启动 Node 进程（用 PM2）
 
@@ -108,6 +104,13 @@ pm2 startup     # 按提示执行那行命令，开机自启
 
 保存。
 
+> 反向代理必须把真实客户端 IP 透传给 Node，否则登录/注册限流取不到真实 IP（aPanel 默认一般会加，检查一下反代配置里有没有这一行，没有就手动加上）：
+>
+> ```nginx
+> proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+> proxy_set_header X-Real-IP $remote_addr;
+> ```
+
 ## 八、申请 SSL
 
 站点设置 → **SSL** → Let's Encrypt → 选中域名 → 申请 → 强制 HTTPS。
@@ -135,8 +138,16 @@ npm run seed:admin
 ```
 
 脚本会按邮箱 upsert：
-- 账号不存在 → 直接创建管理员账号
-- 账号已存在 → 把它升级为管理员（同时重置密码为 `ADMIN_PASSWORD`）
+- 账号不存在 → 直接创建管理员账号（密码就是 `ADMIN_PASSWORD`）
+- 账号已存在 → 只把它升级为管理员，**密码不变**（不会用 `ADMIN_PASSWORD` 覆盖原密码）
+
+想重置已有账号的密码，要显式加 `--reset-password`：
+
+```bash
+npm run seed:admin -- --reset-password
+```
+
+这样才会把该账号的密码改成 `ADMIN_PASSWORD`。
 
 执行完登录这个邮箱，攻略侧栏右上角会出现橙色"刷新"按钮（仅管理员可见），点一下就重新调大模型生成攻略并覆盖数据库缓存。
 
